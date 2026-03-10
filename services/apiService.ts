@@ -43,15 +43,13 @@ export const getTronityAuthUrl = () => {
 
 export const exchangeCodeForToken = async (code: string) => {
   try {
-    const response = await fetch('https://api.tronity.io/oauth/token', {
+    const response = await fetch('/api/tronity/token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         grant_type: 'authorization_code',
-        client_id: TRONITY_CONFIG.clientId,
-        client_secret: TRONITY_CONFIG.clientSecret,
         code: code,
         redirect_uri: TRONITY_CONFIG.redirectUri,
       })
@@ -68,36 +66,74 @@ export const exchangeCodeForToken = async (code: string) => {
   return null;
 };
 
+export const ensureAuthenticated = async () => {
+  let token = localStorage.getItem('tronity_token');
+  if (token) return token;
+
+  try {
+    const response = await fetch('/api/tronity/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        grant_type: 'client_credentials',
+      })
+    });
+
+    const data = await response.json();
+    if (data.access_token) {
+      localStorage.setItem('tronity_token', data.access_token);
+      return data.access_token;
+    }
+  } catch (error) {
+    console.error("Tronity Auto-Auth Error:", error);
+  }
+  return null;
+};
+
 export const fetchCarData = async (): Promise<CarState> => {
-  const token = localStorage.getItem('tronity_token');
+  const token = await ensureAuthenticated();
   
   if (token) {
     try {
-      const vResponse = await fetch('https://api.tronity.io/v1/vehicles', {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const vResponse = await fetch('/api/tronity/vehicles', {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json'
+        }
       });
-      const vData = await vResponse.json();
       
-      if (vData.data && vData.data.length > 0) {
-        const vehicle = vData.data[0];
+      if (!vResponse.ok) throw new Error(`Vehicles API error: ${vResponse.status}`);
+      
+      const vData = await vResponse.json();
+      const vehicles = Array.isArray(vData) ? vData : (vData.data || []);
+      
+      if (vehicles.length > 0) {
+        const vehicle = vehicles[0];
         const vehicleId = vehicle.id;
         
-        const rResponse = await fetch(`https://api.tronity.io/v1/vehicles/${vehicleId}/last_record`, {
-          headers: { 'Authorization': `Bearer ${token}` }
+        const rResponse = await fetch(`/api/tronity/vehicles/${vehicleId}/last_record`, {
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json'
+          }
         });
-        const rData = await rResponse.json();
         
-        if (rData) {
-          mockState.batteryLevel = rData.level || mockState.batteryLevel;
-          mockState.rangeKm = rData.range || mockState.rangeKm;
-          mockState.odometer = rData.odometer || mockState.odometer;
-          mockState.isCharging = rData.charging === 'Charging';
-          mockState.isConnected = true;
-          mockState.lastUpdate = new Date().toISOString();
+        if (rResponse.ok) {
+          const rData = await rResponse.json();
+          if (rData) {
+            mockState.batteryLevel = typeof rData.level === 'number' ? rData.level : mockState.batteryLevel;
+            mockState.rangeKm = typeof rData.range === 'number' ? rData.range : mockState.rangeKm;
+            mockState.odometer = typeof rData.odometer === 'number' ? rData.odometer : mockState.odometer;
+            mockState.isCharging = rData.charging === 'Charging' || rData.is_charging === true;
+            mockState.isConnected = true;
+            mockState.lastUpdate = new Date().toISOString();
+          }
         }
       }
     } catch (error) {
-      console.warn("Tronity Sync Error, using fallback.");
+      console.warn("Tronity Sync Error:", error);
       mockState.isConnected = false;
     }
   }
@@ -116,7 +152,7 @@ export const fetchCarData = async (): Promise<CarState> => {
 };
 
 export const fetchHistoryData = async (): Promise<TelemetryPoint[]> => {
-  const token = localStorage.getItem('tronity_token');
+  const token = await ensureAuthenticated();
   const history: TelemetryPoint[] = [];
 
   if (token) {

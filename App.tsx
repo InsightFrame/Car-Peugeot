@@ -26,30 +26,38 @@ const App: React.FC = () => {
     const init = async () => {
       try {
         setLoading(true);
+        console.log("Iniciando sincronização Peugeot...");
         const urlParams = new URLSearchParams(window.location.search);
         const code = urlParams.get('code');
         
         if (code) {
+          console.log("Código de autorização detectado, trocando por token...");
           await exchangeCodeForToken(code);
           window.history.replaceState({}, document.title, window.location.pathname);
         }
 
+        console.log("Procurando dados do veículo...");
         const [data, historyData] = await Promise.all([
           fetchCarData(),
           fetchHistoryData()
         ]);
         
+        console.log("Dados recebidos:", data);
         setCarState(data);
         setHistory(historyData);
         
-        const aiTips = await getSmartInsights(data);
-        setInsights(aiTips);
+        try {
+          const aiTips = await getSmartInsights(data);
+          setInsights(aiTips);
+        } catch (aiErr) {
+          console.warn("Erro ao obter insights AI:", aiErr);
+        }
         
         setLoading(false);
         setShowWelcome(true);
         setTimeout(() => setShowWelcome(false), 3500);
       } catch (e) {
-        console.error("Erro na inicialização:", e);
+        console.error("Erro crítico na inicialização:", e);
         setLoading(false);
       }
     };
